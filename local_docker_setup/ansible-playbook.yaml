@@ -1,0 +1,60 @@
+---
+- hosts: all
+  tasks:
+    - name: Wait for ssh connection # Wait for full initialize slave instance & establish ssh connection.
+      # gather_facts: false
+      wait_for:
+        port: 22
+        delay: 10
+        timout: 100
+        search_regex: OpenSSH
+        host: "{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}"
+        # https://docs.ansible.com/ansible/latest/collections/ansible/builtin/wait_for_module.html
+      vars:
+        ansible_connection: local
+
+    - name: Install Docker
+      become: yes   # bydefault it will be a root user
+      become_user: root # you can explicitly mention to become root user
+      vars:
+        ansible_python_interpreter: /usr/bin/python
+      yum:
+        name: docker
+        update_cache: yes
+        state: present
+
+    - name: Install / Download docker-compose
+      become: yes #play the task as a root user
+      get_url:
+        url: https://github.com/docker/compose/releases/latest/download/docker-compose-Linux-{{lookup('pipe','uname -m')}}
+        dest: /usr/local/bin/docker-compose
+        mode: +x
+
+    - name: Install docker python module
+      become: yes
+      pip:
+        name:
+          - docker
+          - docker-compose
+
+    - name: Start docker daemon/service
+      service:
+        name: docker
+        state: reloaded
+        enabled: true
+
+    - name: Create new linux user
+      become: yes
+      user:
+        name: service_user
+        groups: adm,docker
+
+    - name: Copy docker compose (jenkins folder) to destination & start container
+      become: yes
+      become_user: service_user
+      copy:
+        src: /root/ansible/jenkins
+        dest: /home/service_user/
+
+      docker-compose:
+        project_src: /home/service_user/jenkins
